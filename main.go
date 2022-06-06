@@ -3,25 +3,60 @@ package main
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 )
 
+var (
+	device      string = "wlo1"
+	snaplen     int32  = 1600
+	promiscuous bool   = true
+	err         error
+	timeout     time.Duration = pcap.BlockForever
+	handle      *pcap.Handle
+)
+
 // Hello returns a greeting for the named person.
 func main() {
-	if handle, err := pcap.OpenLive("wlo1", 1600, true, pcap.BlockForever); err != nil {
-		panic(err)
-	} else {
-		err = handle.SetBPFFilter("dst host 1.1.1.1")
-		if err != nil {
-			log.Fatal(err)
+	getDevices()
+	startLiveCapture()
+}
+
+func getDevices() {
+	// get devices
+	devices, err := pcap.FindAllDevs()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// display device info
+	fmt.Printf("Devices:\n\n")
+	for _, device := range devices {
+		fmt.Println("Name: ", device.Name)
+		fmt.Println("Interface: ", device.Description)
+		for _, address := range device.Addresses {
+			fmt.Println("- - Address: ", address.IP)
 		}
-		packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-		for packet := range packetSource.Packets() {
-			handlePacket(packet) // Do something with a packet here.
-		}
+		fmt.Println()
+	}
+}
+
+func startLiveCapture() {
+	// open an interface
+	handle, err = pcap.OpenLive(device, snaplen, promiscuous, timeout)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer handle.Close()
+
+	// take handler and set as the packet source
+	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	for packet := range packetSource.Packets() {
+		// process packets
+		handlePacket(packet)
 	}
 }
 
@@ -36,24 +71,24 @@ func handlePacket(packet gopacket.Packet) {
 		printPacket := ""
 		if nlipv4 != nil {
 			ipv4 := nlipv4.(*layers.IPv4)
-			printPacket = fmt.Sprintf("%vSource IPv4: %v|Destination IPv4: %v|Protocol: %v|", printPacket, ipv4.SrcIP, ipv4.DstIP, ipv4.Protocol)
+			printPacket = fmt.Sprintf("%vsIPv4:%-37vdIPv4:%-37v", printPacket, ipv4.SrcIP, ipv4.DstIP)
 		}
 		if nlipv6 != nil {
 			ipv6 := nlipv6.(*layers.IPv6)
-			printPacket = fmt.Sprintf("%vSource IPv6: %v|Destination IPv6: %v|", printPacket, ipv6.SrcIP, ipv6.DstIP)
+			printPacket = fmt.Sprintf("%vsIPv6:%-37vdIPv6:%-37v", printPacket, ipv6.SrcIP, ipv6.DstIP)
 		}
 		if tltcp != nil {
 			tcp := tltcp.(*layers.TCP)
 			// can add tcp message types
-			printPacket = fmt.Sprintf("%vSource Port: %v|Destination Port: %v|", printPacket, tcp.SrcPort, tcp.DstPort)
+			printPacket = fmt.Sprintf("%vsPort:%-8ddPort:%-8dProto:TCP  ", printPacket, tcp.SrcPort, tcp.DstPort)
 		}
 		if tludp != nil {
 			udp := tludp.(*layers.UDP)
-			printPacket = fmt.Sprintf("%vSource Port: %v|Destination Port: %v|", printPacket, udp.SrcPort, udp.DstPort)
+			printPacket = fmt.Sprintf("%vsPort:%-8ddPort:%-8dProto:UDP  ", printPacket, udp.SrcPort, udp.DstPort)
 		}
 		ethernet := ll.(*layers.Ethernet)
 		// can add length and type
-		printPacket = fmt.Sprintf("%vSource MAC: %v|Destination Mac: %v|", printPacket, ethernet.SrcMAC, ethernet.DstMAC)
+		printPacket = fmt.Sprintf("%vsMAC:%-21vdMAC:%v", printPacket, ethernet.SrcMAC, ethernet.DstMAC)
 		fmt.Println(printPacket)
 	}
 }
